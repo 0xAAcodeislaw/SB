@@ -972,6 +972,56 @@ systemctl start warp-go >/dev/null 2>&1
 fi
 }
 
+remove_empty_fixed_argo(){
+# A running temporary Argo tunnel does not imply that a fixed tunnel exists.
+# When the fixed-domain marker is absent, never publish empty SNI/Host values.
+if [[ -s /etc/s-box/sbargoym.log ]]; then
+return
+fi
+
+rm -f /etc/s-box/vm_ws_argogd.txt
+
+if [[ -f /etc/s-box/clmi.yaml ]]; then
+awk '
+  /^- name: vmess-(tls-)?argo固定-/ {skip=1; next}
+  /^proxy-groups:/ {skip=0}
+  /^- name: / {skip=0}
+  skip {next}
+  /^[[:space:]]+- vmess-(tls-)?argo固定-/ {next}
+  {print}
+' /etc/s-box/clmi.yaml > /etc/s-box/clmi.yaml.tmp && mv /etc/s-box/clmi.yaml.tmp /etc/s-box/clmi.yaml
+fi
+
+if [[ -f /etc/s-box/sbox.json ]]; then
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path('/etc/s-box/sbox.json')
+try:
+    data = json.loads(path.read_text())
+except Exception:
+    # Leave an unexpected/partially written file untouched.
+    raise SystemExit(0)
+
+outbounds = data.get('outbounds')
+if isinstance(outbounds, list):
+    data['outbounds'] = [
+        item for item in outbounds
+        if not (isinstance(item, dict) and 'argo固定' in str(item.get('tag', '')))
+    ]
+    for item in data['outbounds']:
+        if isinstance(item, dict) and isinstance(item.get('outbounds'), list):
+            item['outbounds'] = [
+                tag for tag in item['outbounds'] if 'argo固定' not in str(tag)
+            ]
+    tmp = path.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=4) + '\n')
+    tmp.replace(path)
+PY
+fi
+}
+
 result_vl_vm_hy_tu(){
 if [[ -f /root/ygkkkca/cert.crt && -f /root/ygkkkca/private.key && -s /root/ygkkkca/cert.crt && -s /root/ygkkkca/private.key ]]; then
 ym=`bash ~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}'`
@@ -1083,6 +1133,7 @@ cl_an_ip=$ym
 ins_an=0
 an_ins=false
 fi
+remove_empty_fixed_argo
 }
 
 resvless(){
@@ -1115,7 +1166,7 @@ echo "二维码【v2rayn、v2rayng、nekobox、小火箭shadowrocket】"
 echo 'vmess://'$(echo '{"add":"'$vmadd_argo'","aid":"0","host":"'$argo'","id":"'$uuid'","net":"ws","path":"'$ws_path'","port":"443","ps":"'vm-argo-$hostname'","tls":"tls","sni":"'$argo'","fp":"chrome","type":"none","v":"2"}' | base64 -w 0) > /etc/s-box/vm_ws_argols.txt
 qrencode -o - -t ANSIUTF8 "$(cat /etc/s-box/vm_ws_argols.txt)"
 fi
-if ps -ef 2>/dev/null | grep -q '[c]loudflared.*run'; then
+if ps -ef 2>/dev/null | grep -q '[c]loudflared.*run' && [ -s /etc/s-box/sbargoym.log ]; then
 argogd=$(cat /etc/s-box/sbargoym.log 2>/dev/null)
 echo
 white "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
