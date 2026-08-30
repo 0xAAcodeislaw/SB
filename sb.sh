@@ -972,53 +972,19 @@ systemctl start warp-go >/dev/null 2>&1
 fi
 }
 
-remove_empty_fixed_argo(){
-# A running temporary Argo tunnel does not imply that a fixed tunnel exists.
-# When the fixed-domain marker is absent, never publish empty SNI/Host values.
-if [[ -s /etc/s-box/sbargoym.log ]]; then
-return
+refresh_argo_subscription_state(){
+argo=$(grep -a 'trycloudflare.com' /etc/s-box/argo.log 2>/dev/null | awk 'NR==2{print}' | awk -F// '{print $2}' | awk '{print $1}' | tr -d '[:space:]')
+argogd=$(tr -d '[:space:]' 2>/dev/null < /etc/s-box/sbargoym.log)
+argo_temp_ready=false
+argo_fixed_ready=false
+
+if [[ "$tls" = "false" ]]; then
+if [[ -n "$argo" ]] && ps -ef 2>/dev/null | grep -q "[l]ocalhost:$vm_port"; then
+argo_temp_ready=true
 fi
-
-rm -f /etc/s-box/vm_ws_argogd.txt
-
-if [[ -f /etc/s-box/clmi.yaml ]]; then
-awk '
-  /^- name: vmess-(tls-)?argo固定-/ {skip=1; next}
-  /^proxy-groups:/ {skip=0}
-  /^- name: / {skip=0}
-  skip {next}
-  /^[[:space:]]+- vmess-(tls-)?argo固定-/ {next}
-  {print}
-' /etc/s-box/clmi.yaml > /etc/s-box/clmi.yaml.tmp && mv /etc/s-box/clmi.yaml.tmp /etc/s-box/clmi.yaml
+if [[ -n "$argogd" ]] && ps -ef 2>/dev/null | grep -q '[c]loudflared.*run'; then
+argo_fixed_ready=true
 fi
-
-if [[ -f /etc/s-box/sbox.json ]]; then
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-path = Path('/etc/s-box/sbox.json')
-try:
-    data = json.loads(path.read_text())
-except Exception:
-    # Leave an unexpected/partially written file untouched.
-    raise SystemExit(0)
-
-outbounds = data.get('outbounds')
-if isinstance(outbounds, list):
-    data['outbounds'] = [
-        item for item in outbounds
-        if not (isinstance(item, dict) and 'argo固定' in str(item.get('tag', '')))
-    ]
-    for item in data['outbounds']:
-        if isinstance(item, dict) and isinstance(item.get('outbounds'), list):
-            item['outbounds'] = [
-                tag for tag in item['outbounds'] if 'argo固定' not in str(tag)
-            ]
-    tmp = path.with_suffix('.json.tmp')
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=4) + '\n')
-    tmp.replace(path)
-PY
 fi
 }
 
@@ -1035,7 +1001,6 @@ vl_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[0].listen_port')
 vl_name=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[0].tls.server_name')
 public_key=$(cat /etc/s-box/public.key)
 short_id=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[0].tls.reality.short_id[0]')
-argo=$(cat /etc/s-box/argo.log 2>/dev/null | grep -a trycloudflare.com | awk 'NR==2{print}' | awk -F// '{print $2}' | awk '{print $1}')
 ws_path=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].transport.path')
 vm_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')
 tls=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].tls.enabled')
@@ -1133,7 +1098,7 @@ cl_an_ip=$ym
 ins_an=0
 an_ins=false
 fi
-remove_empty_fixed_argo
+refresh_argo_subscription_state
 }
 
 resvless(){
@@ -1154,7 +1119,7 @@ echo
 
 resvmess(){
 if [[ "$tls" = "false" ]]; then
-if ps -ef 2>/dev/null | grep "[l]ocalhost:$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')" >/dev/null 2>&1; then
+if [[ "$argo_temp_ready" = "true" ]]; then
 echo
 white "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 red "🚀【 vmess-ws(tls)+Argo 】临时节点信息如下(可选择3-8-3，自定义CDN优选地址)：" && sleep 2
@@ -1166,8 +1131,7 @@ echo "二维码【v2rayn、v2rayng、nekobox、小火箭shadowrocket】"
 echo 'vmess://'$(echo '{"add":"'$vmadd_argo'","aid":"0","host":"'$argo'","id":"'$uuid'","net":"ws","path":"'$ws_path'","port":"443","ps":"'vm-argo-$hostname'","tls":"tls","sni":"'$argo'","fp":"chrome","type":"none","v":"2"}' | base64 -w 0) > /etc/s-box/vm_ws_argols.txt
 qrencode -o - -t ANSIUTF8 "$(cat /etc/s-box/vm_ws_argols.txt)"
 fi
-if ps -ef 2>/dev/null | grep -q '[c]loudflared.*run' && [ -s /etc/s-box/sbargoym.log ]; then
-argogd=$(cat /etc/s-box/sbargoym.log 2>/dev/null)
+if [[ "$argo_fixed_ready" = "true" ]]; then
 echo
 white "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 red "🚀【 vmess-ws(tls)+Argo 】固定节点信息如下 (可选择3-8-3，自定义CDN优选地址)：" && sleep 2
@@ -1657,7 +1621,8 @@ EOF
 }
 
 tls=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].tls.enabled')
-if ps -ef 2>/dev/null | grep -q '[c]loudflared.*run' && ps -ef 2>/dev/null | grep "[l]ocalhost:$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')" >/dev/null 2>&1 && [ "$tls" = "false" ]; then
+refresh_argo_subscription_state
+if [[ "$argo_fixed_ready" = "true" && "$argo_temp_ready" = "true" ]]; then
 cat > /etc/s-box/sbox.json <<EOF
 $(sball)
 $(sbany2)
@@ -1937,7 +1902,7 @@ rules:
   - MATCH,🌍选择代理节点
 EOF
 
-elif ! ps -ef 2>/dev/null | grep -q '[c]loudflared.*run' && ps -ef 2>/dev/null | grep "[l]ocalhost:$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')" >/dev/null 2>&1 && [ "$tls" = "false" ]; then
+elif [[ "$argo_fixed_ready" = "false" && "$argo_temp_ready" = "true" ]]; then
 cat > /etc/s-box/sbox.json <<EOF
 $(sball)
 $(sbany2)
@@ -2127,7 +2092,7 @@ rules:
   - MATCH,🌍选择代理节点
 EOF
 
-elif ps -ef 2>/dev/null | grep -q '[c]loudflared.*run' && ! ps -ef 2>/dev/null | grep "[l]ocalhost:$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')" >/dev/null 2>&1 && [ "$tls" = "false" ]; then
+elif [[ "$argo_fixed_ready" = "true" && "$argo_temp_ready" = "false" ]]; then
 cat > /etc/s-box/sbox.json <<EOF
 $(sball)
 $(sbany2)
