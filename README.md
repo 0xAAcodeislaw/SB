@@ -44,11 +44,20 @@
 ### VPS专用一键脚本如下：快捷方式：```sb```
 
 ```
-bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/0xAAcodeislaw/SB/main/sb.sh)
 ```
 或者
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/0xAAcodeislaw/SB/main/sb.sh)
+```
+
+本仓库的 VPS 一键安装和脚本升级地址均指向本仓库。同步上游代码时，请先抓取并合并上游分支后再推送 `main`，不要直接用上游内容覆盖 `main`：
+
+```
+git fetch upstream main
+git switch main
+git merge --no-ff upstream/main
+git push origin main
 ```
 
 一键快捷命令现实本地IP订阅：```printf '3\n8\n1\n订阅密码' | sb```
