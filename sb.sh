@@ -3202,6 +3202,8 @@ blue "www.wto.org"
 blue "www.shopify.com"
 blue "yg1.ygkkk.dpdns.org (yg1中的1，可换为1-13中任意数字)"
 echo
+yellow "恢复默认操作：选项1设置为VPS的IP或者解析的域名，选项2设置为www.bing.com或者解析的域名"
+echo
 yellow "1：自定义Vmess-ws(tls)主协议节点的CDN优选地址"
 yellow "2：针对选项1，重置客户端host/sni域名(IP解析到CF上的域名)"
 yellow "3：自定义Vmess-ws(tls)-Argo节点的CDN优选地址"
