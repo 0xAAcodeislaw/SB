@@ -957,6 +957,84 @@ red "Sing-box服务未运行" && exit
 fi
 }
 
+refresh_server_ip_state(){
+if [[ ! -d /etc/s-box ]]; then
+return
+fi
+
+local configured_ip configured_ipcl detected_ip use_ipv6=false detected_ok=false
+configured_ip=$(tr -d '[:space:]' < /etc/s-box/server_ip.log 2>/dev/null)
+configured_ipcl=$(tr -d '[:space:]' < /etc/s-box/server_ipcl.log 2>/dev/null)
+if [[ "$configured_ip" == \[*\] || "$configured_ip" == *:* || "$configured_ipcl" == *:* ]]; then
+use_ipv6=true
+fi
+
+# When WARP is enabled, temporarily stop only its active services so that
+# the subscription address records the VPS public IP instead of the WARP exit IP.
+local wgcf_active=false warp_go_active=false
+if command -v systemctl >/dev/null 2>&1; then
+if systemctl is-active --quiet wg-quick@wgcf 2>/dev/null; then
+wgcf_active=true
+systemctl stop wg-quick@wgcf >/dev/null 2>&1
+fi
+if systemctl is-active --quiet warp-go 2>/dev/null; then
+warp_go_active=true
+systemctl stop warp-go >/dev/null 2>&1
+fi
+if [[ "$wgcf_active" = "true" || "$warp_go_active" = "true" ]]; then
+sleep 2
+fi
+fi
+
+if [[ "$use_ipv6" = "true" ]]; then
+detected_ip=$(curl -s6m5 icanhazip.com -k 2>/dev/null | tr -d '[:space:]')
+if [[ "$detected_ip" == *:* ]]; then
+detected_ok=true
+else
+detected_ip=$(curl -s4m5 icanhazip.com -k 2>/dev/null | tr -d '[:space:]')
+if [[ "$detected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+use_ipv6=false
+detected_ok=true
+fi
+fi
+else
+detected_ip=$(curl -s4m5 icanhazip.com -k 2>/dev/null | tr -d '[:space:]')
+if [[ "$detected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+detected_ok=true
+else
+detected_ip=$(curl -s6m5 icanhazip.com -k 2>/dev/null | tr -d '[:space:]')
+if [[ "$detected_ip" == *:* ]]; then
+use_ipv6=true
+detected_ok=true
+fi
+fi
+fi
+
+if [[ "$warp_go_active" = "true" ]]; then
+systemctl start warp-go >/dev/null 2>&1
+fi
+if [[ "$wgcf_active" = "true" ]]; then
+systemctl start wg-quick@wgcf >/dev/null 2>&1
+fi
+
+if [[ "$detected_ok" != "true" ]]; then
+return
+fi
+
+if [[ "$use_ipv6" = "true" ]]; then
+server_ip="[$detected_ip]"
+server_ipcl="$detected_ip"
+else
+server_ip="$detected_ip"
+server_ipcl="$detected_ip"
+fi
+
+if [[ "$server_ip" != "$configured_ip" || "$server_ipcl" != "$configured_ipcl" ]]; then
+printf '%s\n' "$server_ip" > /etc/s-box/server_ip.log
+printf '%s\n' "$server_ipcl" > /etc/s-box/server_ipcl.log
+fi
+}
+
 wgcfgo(){
 warpcheck
 if [[ ! $wgcfv4 =~ on|plus && ! $wgcfv6 =~ on|plus ]]; then
@@ -994,6 +1072,7 @@ ym=`bash ~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}'`
 echo $ym > /root/ygkkkca/ca.log
 fi
 rm -rf /etc/s-box/vm_ws_argo.txt /etc/s-box/vm_ws.txt /etc/s-box/vm_ws_tls.txt
+refresh_server_ip_state
 server_ip=$(cat /etc/s-box/server_ip.log)
 server_ipcl=$(cat /etc/s-box/server_ipcl.log)
 uuid=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[0].users[0].uuid')
